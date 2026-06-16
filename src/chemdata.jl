@@ -3,6 +3,18 @@ using MolecularGraph: ATOMTABLE, ATOMSYMBOLMAP, ATOM_COVALENT_RADII, ATOM_VANDER
 ATOMSYMBOLKEYS = keys(ATOMSYMBOLMAP) |> collect
 atomicmasses = Dict{String,Float32}(ATOMSYMBOLKEYS.=>[ATOMTABLE[ATOMSYMBOLMAP[x]]["Weight"] for x in ATOMSYMBOLKEYS])
 
+# MolecularGraph keys its tables in title-case ("Mg", "Ca", "Fe"), but BioStructures reports
+# element strings in uppercase ("MG", "CA", "FE"). Add an uppercase alias for every key so
+# lookups by either convention succeed (e.g. metal ions in DNA structures like 7CZL).
+function _addupperaliases!(d::AbstractDict)
+	for (k, v) in collect(d)
+		up = uppercase(k)
+		get!(d, up, v)
+	end
+	return d
+end
+_addupperaliases!(atomicmasses)
+
 # Collection of radii using MolecularGraph.jl constants.
 # Covalent radii
 _covrad = []
@@ -17,6 +29,7 @@ for x in ATOMSYMBOLKEYS
 	push!(_covrad,Dict{String,Float32}("Co h.s." => 1.5, "Co l.s." => 1.26))
 end
 covalentradii = merge(_covrad...)
+_addupperaliases!(covalentradii)
 
 # VanderWaals radii
 _vdwrad = []
@@ -27,3 +40,4 @@ for x in ATOMSYMBOLKEYS
 	end
 end
 vanderwaalsradii = merge(_vdwrad...)
+_addupperaliases!(vanderwaalsradii)

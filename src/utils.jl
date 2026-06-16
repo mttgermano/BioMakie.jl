@@ -289,14 +289,14 @@ end
 function resmass(res::BioStructures.Residue)
     total = 0.0
     for atm in res
-        total+=atomicmasses["$(element(atm, strip=true))"]
+        total+=get(atomicmasses, "$(element(atm, strip=true))", 0.0f0)
     end
     return total
 end
 function resvdw(res::BioStructures.Residue)
     total = 0.0
     for atm in res
-        total+=vdw["$(element(atm, strip=true))"]
+        total+=get(vanderwaalsradii, "$(element(atm, strip=true))", 1.5f0)
     end
     return total
 end

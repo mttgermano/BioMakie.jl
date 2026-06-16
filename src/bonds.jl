@@ -233,22 +233,22 @@ function covalentbonds(atms::Vector{T};
 		for j in (i+1):nextresatms
 			### backbone bonds ###
 			if strip(atms[i].name) in backboneconnectoratoms && strip(atms[j].name) in backboneconnectoratoms
-				if euclidean(coords(atms[i]), coords(atms[j])) < (covalentradii[BioStructures.element(atms[i])] +
-						covalentradii[BioStructures.element(atms[j])] + extradistance)
+				if euclidean(coords(atms[i]), coords(atms[j])) < (get(covalentradii, BioStructures.element(atms[i]), 0.77f0) +
+						get(covalentradii, BioStructures.element(atms[j]), 0.77f0) + extradistance)
 					push!(bonds, (min(i,j),max(i,j)))
 				end
 			end
 			### residue bonds ###
 			if atms[i].residue == atms[j].residue
 				if H == true
-					if euclidean(coords(atms[i]), coords(atms[j])) < (covalentradii[strip(atms[i].element)] +
-							covalentradii[strip(atms[j].element)] + extradistance)
+					if euclidean(coords(atms[i]), coords(atms[j])) < (get(covalentradii, strip(atms[i].element), 0.77f0) +
+							get(covalentradii, strip(atms[j].element), 0.77f0) + extradistance)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				else
 					if !(strip(atms[i].element) == "H" || strip(atms[j].element) == "H")
-						if euclidean(coords(atms[i]), coords(atms[j])) < (covalentradii[strip(atms[i].element)] +
-								covalentradii[strip(atms[j].element)] + extradistance)
+						if euclidean(coords(atms[i]), coords(atms[j])) < (get(covalentradii, strip(atms[i].element), 0.77f0) +
+								get(covalentradii, strip(atms[j].element), 0.77f0) + extradistance)
 							push!(bonds, (min(i,j),max(i,j)))
 						end
 					end
@@ -289,22 +289,22 @@ function covalentbonds(resz::Vector{T};
 		for j in (i+1):nextresatms
 			### backbone bonds ###
 			if atms[i].atom in backboneconnectoratoms && atms[j].atom in backboneconnectoratoms
-				if euclidean(atms[i].coordinates, atms[j].coordinates) < (covalentradii[atms[i].element] +
-						covalentradii[atms[j].element] + extradistance)
+				if euclidean(atms[i].coordinates, atms[j].coordinates) < (get(covalentradii, atms[i].element, 0.77f0) +
+						get(covalentradii, atms[j].element, 0.77f0) + extradistance)
 					push!(bonds, (min(i,j),max(i,j)))
 				end
 			end
 			### residue bonds ###
 			if resindices[i] == resindices[j]
 				if H == true
-					if euclidean(atms[i].coordinates,atms[j].coordinates) < (covalentradii[atms[i].element] +
-							covalentradii[atms[j].element] + extradistance)
+					if euclidean(atms[i].coordinates,atms[j].coordinates) < (get(covalentradii, atms[i].element, 0.77f0) +
+							get(covalentradii, atms[j].element, 0.77f0) + extradistance)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				else
 					if !(atms[i].element == "H" || atms[j].element == "H")
-						if euclidean(atms[i].coordinates,atms[j].coordinates) < (covalentradii[atms[i].element] +
-								covalentradii[atms[j].element] + extradistance)
+						if euclidean(atms[i].coordinates,atms[j].coordinates) < (get(covalentradii, atms[i].element, 0.77f0) +
+								get(covalentradii, atms[j].element, 0.77f0) + extradistance)
 							push!(bonds, (min(i,j),max(i,j)))
 						end
 					end
@@ -335,14 +335,14 @@ function covalentbonds(atms::Vector{T};
 	for i in 1:numatoms
 		for j in (i+1):numatoms
 			if H == true
-				if euclidean(atms[i].coordinates,atms[j].coordinates) < (covalentradii[atms[i].element] +
-						covalentradii[atms[j].element] + extradistance)
+				if euclidean(atms[i].coordinates,atms[j].coordinates) < (get(covalentradii, atms[i].element, 0.77f0) +
+						get(covalentradii, atms[j].element, 0.77f0) + extradistance)
 					push!(bonds, (min(i,j),max(i,j)))
 				end
 			else
 				if !(atms[i].element == "H" || atms[j].element == "H")
-					if euclidean(atms[i].coordinates,atms[j].coordinates) < (covalentradii[atms[i].element] +
-							covalentradii[atms[j].element] + extradistance)
+					if euclidean(atms[i].coordinates,atms[j].coordinates) < (get(covalentradii, atms[i].element, 0.77f0) +
+							get(covalentradii, atms[j].element, 0.77f0) + extradistance)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
@@ -406,11 +406,11 @@ function sidechainbonds(res::BioStructures.AbstractResidue, selectors...;
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+					if hasknowledgebasedbond(get(heavyresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+					if H == true && hasknowledgebasedbond(get(hresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
@@ -503,11 +503,11 @@ function getbonds(chn::BioStructures.Chain, selectors...;
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+					if hasknowledgebasedbond(get(heavyresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+					if H == true && hasknowledgebasedbond(get(hresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
@@ -568,11 +568,11 @@ function getbonds(modl::BioStructures.Model, selectors...;
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+					if hasknowledgebasedbond(get(heavyresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+					if H == true && hasknowledgebasedbond(get(hresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
@@ -633,11 +633,11 @@ function getbonds(struc::BioStructures.MolecularStructure, selectors...;
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+					if hasknowledgebasedbond(get(heavyresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+					if H == true && hasknowledgebasedbond(get(hresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
@@ -712,11 +712,11 @@ function getbonds(resz::Vector{MIToS.PDB.PDBResidue};
 					end
 				end
 				### residue atoms ###
-				if resindices[i] == resindices[j] && hasknowledgebasedbond(heavyresbonds[resnames[i]], firstatomname, secondatomname)
+				if resindices[i] == resindices[j] && hasknowledgebasedbond(get(heavyresbonds, resnames[i], Tuple{String,String}[]), firstatomname, secondatomname)
 					push!(bonds, (min(i,j),max(i,j)))
 				end
 				### hydrogen atoms ###
-				if H == true && hasknowledgebasedbond(hresbonds[resnames[i]], firstatomname, secondatomname)
+				if H == true && hasknowledgebasedbond(get(hresbonds, resnames[i], Tuple{String,String}[]), firstatomname, secondatomname)
 					push!(bonds, (min(i,j),max(i,j)))
 				end
 			end
@@ -801,11 +801,11 @@ function getbonds(resz::Vector{T};
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+					if hasknowledgebasedbond(get(heavyresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+					if H == true && hasknowledgebasedbond(get(hresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
@@ -867,11 +867,11 @@ function getbonds(atms::Vector{T};
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+					if hasknowledgebasedbond(get(heavyresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+					if H == true && hasknowledgebasedbond(get(hresbonds, atmres.name, Tuple{String,String}[]), firstatomname, secondatomname)
 						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
