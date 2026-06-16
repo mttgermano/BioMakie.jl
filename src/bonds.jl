@@ -12,10 +12,7 @@ export distancebonds,
 # bond (C-N) and the DNA/RNA phosphodiester bond (O3'-P).
 const backboneconnectoratoms = ["N","CA","C","O","P","O3'"]
 
-# Atom names (CA, C, N, O, O3', ...) repeat across nearly all ~50k residue types in
-# heavyresbonds/hresbonds, so the parsed string literals would otherwise be millions of
-# duplicate String objects. Intern them once at load so identical names share one object,
-# cutting the resident footprint of both dictionaries substantially.
+# Intern atom names shared across the ~50k residue types in heavyresbonds/hresbonds so identical names share one String object, cutting both dictionaries' footprint.
 let pool = Dict{String,String}()
 	intern(s) = get!(pool, s, s)
 	for d in (heavyresbonds, hresbonds), k in keys(d)
