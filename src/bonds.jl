@@ -20,8 +20,12 @@ let pool = Dict{String,String}()
 	end
 end
 
-# Returns true if (atom1, atom2) appears (in either order) in a knowledge-based bond list
-# from heavyresbonds/hresbonds. Empty entries (e.g. ions like ZN, SCN) simply return false.
+"""
+	hasknowledgebasedbond( bondlist, atom1, atom2 ) -> Bool
+
+Returns true if (atom1, atom2) appears (in either order) in a knowledge-based bond list
+from heavyresbonds/hresbonds. Empty entries (e.g. ions like ZN, SCN) simply return false.
+"""
 function hasknowledgebasedbond(bondlist::AbstractVector{<:Tuple{<:AbstractString,<:AbstractString}},
 							   atom1::AbstractString, atom2::AbstractString)
 	for (x,y) in bondlist
