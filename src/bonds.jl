@@ -3,11 +3,33 @@ export distancebonds,
 	   sidechainbonds,
 	   backbonebonds,
 	   getbonds,
+	   bondmatrix,
 	   bondshape,
 	   bondshapes
 
+# Atom names (CA, C, N, O, ...) repeat across nearly all ~50k residue types in
+# heavyresbonds/hresbonds, so the parsed string literals would otherwise be millions of
+# duplicate String objects. Intern them once at load so identical names share one object,
+# cutting the resident footprint of both dictionaries substantially.
+let pool = Dict{String,String}()
+	intern(s) = get!(pool, s, s)
+	for d in (heavyresbonds, hresbonds), k in keys(d)
+		d[k] = [(intern(a), intern(b)) for (a,b) in d[k]]
+	end
+end
+
+# Returns true if (atom1, atom2) appears (in either order) in a knowledge-based bond list
+# from heavyresbonds/hresbonds. Empty entries (e.g. ions like ZN, SCN) simply return false.
+function hasknowledgebasedbond(bondlist::AbstractVector{<:Tuple{<:AbstractString,<:AbstractString}},
+							   atom1::AbstractString, atom2::AbstractString)
+	for (x,y) in bondlist
+		((atom1 == x && atom2 == y) || (atom1 == y && atom2 == x)) && return true
+	end
+	return false
+end
+
 """
-	distancebonds( atms ) -> BitMatrix
+	distancebonds( atms ) -> Vector{Tuple{Int,Int}}
 
 Returns a matrix of all bonds in `atms`, where Mat[i,j] = 1 if atoms i and j are bonded.
 
@@ -25,7 +47,7 @@ function distancebonds(atms::Vector{T};
 						H = true,
 						disulfides = false) where {T<:BioStructures.AbstractAtom}
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	for i in 1:numatoms
 		resatoms = BioStructures.collectatoms(atms[i].residue) .|> defaultatom
@@ -38,32 +60,25 @@ function distancebonds(atms::Vector{T};
 			### backbone bonds ###
 			if strip(atms[i].name) in ["N","CA","C","O"] && strip(atms[j].name) in ["N","CA","C","O"]
 				if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-					bondmatrix[i,j] = 1
-					bondmatrix[j,i] = 1
+					push!(bonds, (min(i,j),max(i,j)))
 				end
-			end
-			if bondmatrix[i,j] == 1
-				continue
 			end
 			### residue bonds ###
 			if atms[i].residue == atms[j].residue
 				if H == true
 					if !(strip(atms[i].element) == "H" || strip(atms[j].element) == "H")
 						if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
+							push!(bonds, (min(i,j),max(i,j)))
 						end
 					else
 						if euclidean(coords(atms[i]), coords(atms[j])) < hydrogencutoff
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
+							push!(bonds, (min(i,j),max(i,j)))
 						end
 					end
 				else
 					if !(strip(atms[i].element) == "H" || strip(atms[j].element) == "H")
 						if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
+							push!(bonds, (min(i,j),max(i,j)))
 						end
 					end
 				end
@@ -74,15 +89,14 @@ function distancebonds(atms::Vector{T};
 			for k in 1:numatoms
 				if i != k && strip(atms[i].element) == "S" && strip(atms[k].element) == "S"
 					if euclidean(coords(atms[i]), coords(atms[k])) < 2.1
-						bondmatrix[i,k] = 1
-						bondmatrix[k,i] = 1
+						push!(bonds, (min(i,k),max(i,k)))
 					end
 				end
 			end
 		end
 	end
 
-	return bondmatrix
+	return unique!(bonds)
 end
 function distancebonds(resz::Vector{T};
 						cutoff = 1.9,
@@ -93,7 +107,7 @@ function distancebonds(resz::Vector{T};
 	resindices = [[i for j in 1:size(bestoccupancy(resz[i].atoms),1)] for i in 1:length(resz)] |> flatten
 	resnames = [[resz[i].id.name for j in 1:size(bestoccupancy(resz[i].atoms),1)] for i in 1:length(resz)] |> flatten
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	for i in 1:numatoms
 		resatoms = bestoccupancy(resz[resindices[i]].atoms)
@@ -105,31 +119,24 @@ function distancebonds(resz::Vector{T};
 		for j in (i+1):nextresatms
 			if atms[i].atom in ["N","CA","C","O"] && atms[j].atom in ["N","CA","C","O"]
 				if euclidean(atms[i].coordinates, atms[j].coordinates) < cutoff
-					bondmatrix[i,j] = 1
-					bondmatrix[j,i] = 1
+					push!(bonds, (min(i,j),max(i,j)))
 				end
-			end
-			if bondmatrix[i,j] == 1
-				continue
 			end
 			if resindices[i] == resindices[j]
 				if H == true
 					if atms[i].element == "H" || atms[j].element == "H"
 						if euclidean(atms[i].coordinates,atms[j].coordinates) < hydrogencutoff
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
+							push!(bonds, (min(i,j),max(i,j)))
 						end
 					elseif !(atms[i].element == "H" || atms[j].element == "H")
 						if euclidean(atms[i].coordinates,atms[j].coordinates) < cutoff
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
+							push!(bonds, (min(i,j),max(i,j)))
 						end
 					end
 				else
 					if !(atms[i].element == "H" || atms[j].element == "H")
 						if euclidean(atms[i].coordinates,atms[j].coordinates) < cutoff
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
+							push!(bonds, (min(i,j),max(i,j)))
 						end
 					end
 				end
@@ -140,15 +147,14 @@ function distancebonds(resz::Vector{T};
 			for k in 1:numatoms
 				if i != k && atms[i].element == "S" && atms[k].element == "S"
 					if euclidean(atms[i].coordinates, atms[k].coordinates) < 2.1
-						bondmatrix[i,k] = 1
-						bondmatrix[k,i] = 1
+						push!(bonds, (min(i,k),max(i,k)))
 					end
 				end
 			end
 		end
 	end
 
-	return bondmatrix
+	return unique!(bonds)
 end
 function distancebonds(atms::Vector{T};
 						cutoff = 1.9,
@@ -156,27 +162,24 @@ function distancebonds(atms::Vector{T};
 						H = true,
 						disulfides = false) where {T<:MIToS.PDB.PDBAtom}
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	for i in 1:numatoms
 		for j in (i+1):numatoms
 			if H == true
 				if atms[i].element == "H" || atms[j].element == "H"
 					if euclidean(atms[i].coordinates,atms[j].coordinates) < hydrogencutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				elseif !(atms[i].element == "H" || atms[j].element == "H")
 					if euclidean(atms[i].coordinates,atms[j].coordinates) < cutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			else
 				if !(atms[i].element == "H" || atms[j].element == "H")
 					if euclidean(atms[i].coordinates,atms[j].coordinates) < cutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			end
@@ -186,19 +189,18 @@ function distancebonds(atms::Vector{T};
 			for k in 1:numatoms
 				if i != k && atms[i].element == "S" && atms[k].element == "S"
 					if euclidean(atms[i].coordinates, atms[k].coordinates) < 2.1
-						bondmatrix[i,k] = 1
-						bondmatrix[k,i] = 1
+						push!(bonds, (min(i,k),max(i,k)))
 					end
 				end
 			end
 		end
 	end
 
-	return bondmatrix
+	return unique!(bonds)
 end
 
 """
-	covalentbonds( atms ) -> BitMatrix
+	covalentbonds( atms ) -> Vector{Tuple{Int,Int}}
 
 Returns a matrix of all bonds in `atms`, where Mat[i,j] = 1 if atoms i and j are bonded.
 
@@ -214,7 +216,7 @@ function covalentbonds(atms::Vector{T};
 						H = true,
 						disulfides = false) where {T<:BioStructures.AbstractAtom}
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	for i in 1:numatoms
 		resatoms = BioStructures.collectatoms(atms[i].residue) .|> defaultatom
@@ -228,27 +230,21 @@ function covalentbonds(atms::Vector{T};
 			if strip(atms[i].name) in ["N","CA","C","O"] && strip(atms[j].name) in ["N","CA","C","O"]
 				if euclidean(coords(atms[i]), coords(atms[j])) < (covalentradii[BioStructures.element(atms[i])] +
 						covalentradii[BioStructures.element(atms[j])] + extradistance)
-					bondmatrix[i,j] = 1
-					bondmatrix[j,i] = 1
+					push!(bonds, (min(i,j),max(i,j)))
 				end
-			end
-			if bondmatrix[i,j] == 1
-				continue
 			end
 			### residue bonds ###
 			if atms[i].residue == atms[j].residue
 				if H == true
 					if euclidean(coords(atms[i]), coords(atms[j])) < (covalentradii[strip(atms[i].element)] +
 							covalentradii[strip(atms[j].element)] + extradistance)
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				else
 					if !(strip(atms[i].element) == "H" || strip(atms[j].element) == "H")
 						if euclidean(coords(atms[i]), coords(atms[j])) < (covalentradii[strip(atms[i].element)] +
 								covalentradii[strip(atms[j].element)] + extradistance)
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
+							push!(bonds, (min(i,j),max(i,j)))
 						end
 					end
 				end
@@ -259,15 +255,14 @@ function covalentbonds(atms::Vector{T};
 			for k in 1:numatoms
 				if i != k && strip(atms[i].element) == "S" && strip(atms[k].element) == "S"
 					if euclidean(coords(atms[i]), coords(atms[k])) < 2.1
-						bondmatrix[i,k] = 1
-						bondmatrix[k,i] = 1
+						push!(bonds, (min(i,k),max(i,k)))
 					end
 				end
 			end
 		end
 	end
 
-	return bondmatrix
+	return unique!(bonds)
 end
 function covalentbonds(resz::Vector{T};
 						extradistance = 0.14,
@@ -277,7 +272,7 @@ function covalentbonds(resz::Vector{T};
 	resindices = [[i for j in 1:size(bestoccupancy(resz[i].atoms),1)] for i in 1:length(resz)] |> flatten
 	resnames = [[resz[i].id.name for j in 1:size(bestoccupancy(resz[i].atoms),1)] for i in 1:length(resz)] |> flatten
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	for i in 1:numatoms
 		resatoms = bestoccupancy(resz[resindices[i]].atoms)
@@ -291,27 +286,21 @@ function covalentbonds(resz::Vector{T};
 			if atms[i].atom in ["N","CA","C","O"] && atms[j].atom in ["N","CA","C","O"]
 				if euclidean(atms[i].coordinates, atms[j].coordinates) < (covalentradii[atms[i].element] +
 						covalentradii[atms[j].element] + extradistance)
-					bondmatrix[i,j] = 1
-					bondmatrix[j,i] = 1
+					push!(bonds, (min(i,j),max(i,j)))
 				end
-			end
-			if bondmatrix[i,j] == 1
-				continue
 			end
 			### residue bonds ###
 			if resindices[i] == resindices[j]
 				if H == true
 					if euclidean(atms[i].coordinates,atms[j].coordinates) < (covalentradii[atms[i].element] +
 							covalentradii[atms[j].element] + extradistance)
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				else
 					if !(atms[i].element == "H" || atms[j].element == "H")
 						if euclidean(atms[i].coordinates,atms[j].coordinates) < (covalentradii[atms[i].element] +
 								covalentradii[atms[j].element] + extradistance)
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
+							push!(bonds, (min(i,j),max(i,j)))
 						end
 					end
 				end
@@ -322,37 +311,34 @@ function covalentbonds(resz::Vector{T};
 			for k in 1:numatoms
 				if i != k && atms[i].element == "S" && atms[k].element == "S"
 					if euclidean(atms[i].coordinates, atms[k].coordinates) < 2.1
-						bondmatrix[i,k] = 1
-						bondmatrix[k,i] = 1
+						push!(bonds, (min(i,k),max(i,k)))
 					end
 				end
 			end
 		end
 	end
 
-	return bondmatrix
+	return unique!(bonds)
 end
 function covalentbonds(atms::Vector{T};
 						extradistance = 0.14,
 						H = true,
 						disulfides = false) where {T<:MIToS.PDB.PDBAtom}
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	for i in 1:numatoms
 		for j in (i+1):numatoms
 			if H == true
 				if euclidean(atms[i].coordinates,atms[j].coordinates) < (covalentradii[atms[i].element] +
 						covalentradii[atms[j].element] + extradistance)
-					bondmatrix[i,j] = 1
-					bondmatrix[j,i] = 1
+					push!(bonds, (min(i,j),max(i,j)))
 				end
 			else
 				if !(atms[i].element == "H" || atms[j].element == "H")
 					if euclidean(atms[i].coordinates,atms[j].coordinates) < (covalentradii[atms[i].element] +
 							covalentradii[atms[j].element] + extradistance)
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			end
@@ -362,19 +348,18 @@ function covalentbonds(atms::Vector{T};
 			for k in 1:numatoms
 				if i != k && atms[i].element == "S" && atms[k].element == "S"
 					if euclidean(atms[i].coordinates, atms[k].coordinates) < 2.1
-						bondmatrix[i,k] = 1
-						bondmatrix[k,i] = 1
+						push!(bonds, (min(i,k),max(i,k)))
 					end
 				end
 			end
 		end
 	end
 
-	return bondmatrix
+	return unique!(bonds)
 end
 
 """
-	sidechainbonds( res::BioStructures.AbstractResidue, selectors... ) -> BitMatrix
+	sidechainbonds( res::BioStructures.AbstractResidue, selectors... ) -> Vector{Tuple{Int,Int}}
 
 Returns a matrix of sidechain bonds in `res`, where Mat[i,j] = 1 if atoms i and j are bonded.
 
@@ -394,7 +379,7 @@ function sidechainbonds(res::BioStructures.AbstractResidue, selectors...;
 	resatomdict = res.atoms
 	atms = BioStructures.collectatoms(res, selectors...) .|> defaultatom
 	numatoms = size(atms, 1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	if algo == :knowledgebased
 		for i in 1:numatoms
@@ -410,45 +395,23 @@ function sidechainbonds(res::BioStructures.AbstractResidue, selectors...;
 				secondatomname = atms[j].name |> strip
 				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-						bondmatrix[i,j] = 0
-						bondmatrix[j,i] = 0
+						continue
 					end
-				end
-				if bondmatrix[i,j] == 1
-					continue
 				end
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					heavybondresz = heavyresbonds[atmres.name] |> combinedims
-					heavylength = size(heavybondresz,2)
-					for k in 1:heavylength
-						if firstatomname == heavybondresz[1,k] && secondatomname == heavybondresz[2,k] ||
-								firstatomname == heavybondresz[2,k] && secondatomname == heavybondresz[1,k]
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
-							break
-						end
+					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true
-						hbondresz = hresbonds[atmres.name] |> combinedims
-						if size(hbondresz,1) <= 1
-							continue
-						end
-						hlength = size(hbondresz,2)
-						for k in 1:hlength
-							if firstatomname == hbondresz[1,k] && secondatomname == hbondresz[2,k]
-								bondmatrix[i,j] = 1
-								bondmatrix[j,i] = 1
-								break
-							end
-						end
+					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			end
 		end
-		return bondmatrix
+		return unique!(bonds)
 	elseif algo == :distance
 		return distancebonds(resatoms; cutoff = cutoff, H = H)
 	elseif algo == :covalent
@@ -459,7 +422,7 @@ function sidechainbonds(res::BioStructures.AbstractResidue, selectors...;
 end
 
 """
-	backbonebonds( chn::BioStructures.Chain ) -> BitMatrix
+	backbonebonds( chn::BioStructures.Chain ) -> Vector{Tuple{Int,Int}}
 
 Returns a matrix of backbone bonds in `chn`, where Mat[i,j] = 1 if atoms i and j are bonded.
 
@@ -468,7 +431,7 @@ Returns a matrix of backbone bonds in `chn`, where Mat[i,j] = 1 if atoms i and j
 """
 function backbonebonds(chn::BioStructures.Chain; cutoff = 1.6)
 	bbatoms = BioStructures.collectatoms(chn, backboneselector) .|> defaultatom
-	bondmatrix = zeros(size(bbatoms,1),size(bbatoms,1)) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	for i in 1:size(bbatoms,1)
 		for j in (i+1):size(bbatoms,1)
@@ -476,20 +439,19 @@ function backbonebonds(chn::BioStructures.Chain; cutoff = 1.6)
 			secondatomname = strip(bbatoms[j].name)
 			if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
 				if euclidean(coordarray(bbatoms[i]) |> transpose |> collect, coordarray(bbatoms[j]) |> transpose |> collect) < cutoff
-					bondmatrix[i,j] = 1
-					bondmatrix[j,i] = 1
+					push!(bonds, (min(i,j),max(i,j)))
 				end
 			end
 		end
 	end
 
-	return bondmatrix
+	return unique!(bonds)
 end
 
 """
-	getbonds( chn::BioStructures.Chain, selectors... ) -> BitMatrix
-	getbonds( modl::BioStructures.Model, selectors... ) -> BitMatrix
-	getbonds( struc::BioStructures.MolecularStructure, selectors... ) -> BitMatrix
+	getbonds( chn::BioStructures.Chain, selectors... ) -> Vector{Tuple{Int,Int}}
+	getbonds( modl::BioStructures.Model, selectors... ) -> Vector{Tuple{Int,Int}}
+	getbonds( struc::BioStructures.MolecularStructure, selectors... ) -> Vector{Tuple{Int,Int}}
 
 Returns a matrix of all bonds in `chn`, where Mat[i,j] = 1 if atoms i and j are bonded.
 
@@ -510,7 +472,7 @@ function getbonds(chn::BioStructures.Chain, selectors...;
 				disulfides = false)
 	atms = BioStructures.collectatoms(chn, selectors...) .|> defaultatom
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	if algo == :knowledgebased
 		for i in 1:numatoms
@@ -530,40 +492,18 @@ function getbonds(chn::BioStructures.Chain, selectors...;
 				secondatomname = atms[j].name |> strip
 				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
-				end
-				if bondmatrix[i,j] == 1
-					continue
 				end
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					heavybondresz = heavyresbonds[atmres.name] |> combinedims
-					heavylength = size(heavybondresz,2)
-					for k in 1:heavylength
-						if firstatomname == heavybondresz[1,k] && secondatomname == heavybondresz[2,k] ||
-								firstatomname == heavybondresz[2,k] && secondatomname == heavybondresz[1,k]
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
-							break
-						end
+					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true
-						hbondresz = hresbonds[atmres.name] |> combinedims
-						if size(hbondresz,1) <= 1
-							continue
-						end
-						hlength = size(hbondresz,2)
-						for k in 1:hlength
-							if firstatomname == hbondresz[1,k] && secondatomname == hbondresz[2,k]
-								bondmatrix[i,j] = 1
-								bondmatrix[j,i] = 1
-								break
-							end
-						end
+					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			end
@@ -572,14 +512,13 @@ function getbonds(chn::BioStructures.Chain, selectors...;
 				for k in 1:numatoms
 					if i != k && strip(atms[i].element) == "S" && strip(atms[k].element) == "S"
 						if euclidean(coords(atms[i]), coords(atms[k])) < 2.1
-							bondmatrix[i,k] = 1
-							bondmatrix[k,i] = 1
+							push!(bonds, (min(i,k),max(i,k)))
 						end
 					end
 				end
 			end
 		end
-		return bondmatrix
+		return unique!(bonds)
 	elseif algo == :distance
 		return distancebonds(atms; cutoff = cutoff, H = H, disulfides = disulfides)
 	elseif algo == :covalent
@@ -598,7 +537,7 @@ function getbonds(modl::BioStructures.Model, selectors...;
 				disulfides = false)
 	atms = BioStructures.collectatoms(modl, selectors...) .|> defaultatom
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	if algo == :knowledgebased
 		for i in 1:numatoms
@@ -618,40 +557,18 @@ function getbonds(modl::BioStructures.Model, selectors...;
 				secondatomname = atms[j].name |> strip
 				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
-				end
-				if bondmatrix[i,j] == 1
-					continue
 				end
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					heavybondresz = heavyresbonds[atmres.name] |> combinedims
-					heavylength = size(heavybondresz,2)
-					for k in 1:heavylength
-						if firstatomname == heavybondresz[1,k] && secondatomname == heavybondresz[2,k] ||
-								firstatomname == heavybondresz[2,k] && secondatomname == heavybondresz[1,k]
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
-							break
-						end
+					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true
-						hbondresz = hresbonds[atmres.name] |> combinedims
-						if size(hbondresz,1) <= 1
-							continue
-						end
-						hlength = size(hbondresz,2)
-						for k in 1:hlength
-							if firstatomname == hbondresz[1,k] && secondatomname == hbondresz[2,k]
-								bondmatrix[i,j] = 1
-								bondmatrix[j,i] = 1
-								break
-							end
-						end
+					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			end
@@ -660,14 +577,13 @@ function getbonds(modl::BioStructures.Model, selectors...;
 				for k in 1:numatoms
 					if i != k && strip(atms[i].element) == "S" && strip(atms[k].element) == "S"
 						if euclidean(coords(atms[i]), coords(atms[k])) < 2.1
-							bondmatrix[i,k] = 1
-							bondmatrix[k,i] = 1
+							push!(bonds, (min(i,k),max(i,k)))
 						end
 					end
 				end
 			end
 		end
-		return bondmatrix
+		return unique!(bonds)
 	elseif algo == :distance
 		return distancebonds(atms; cutoff = cutoff, H = H, disulfides = disulfides)
 	elseif algo == :covalent
@@ -686,7 +602,7 @@ function getbonds(struc::BioStructures.MolecularStructure, selectors...;
 				disulfides = false)
 	atms = BioStructures.collectatoms(struc, selectors...) .|> defaultatom
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	if algo == :knowledgebased
 		for i in 1:numatoms
@@ -706,40 +622,18 @@ function getbonds(struc::BioStructures.MolecularStructure, selectors...;
 				secondatomname = atms[j].name |> strip
 				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
-				end
-				if bondmatrix[i,j] == 1
-					continue
 				end
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					heavybondresz = heavyresbonds[atmres.name] |> combinedims
-					heavylength = size(heavybondresz,2)
-					for k in 1:heavylength
-						if firstatomname == heavybondresz[1,k] && secondatomname == heavybondresz[2,k] ||
-								firstatomname == heavybondresz[2,k] && secondatomname == heavybondresz[1,k]
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
-							break
-						end
+					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true
-						hbondresz = hresbonds[atmres.name] |> combinedims
-						if size(hbondresz,1) <= 1
-							continue
-						end
-						hlength = size(hbondresz,2)
-						for k in 1:hlength
-							if firstatomname == hbondresz[1,k] && secondatomname == hbondresz[2,k]
-								bondmatrix[i,j] = 1
-								bondmatrix[j,i] = 1
-								break
-							end
-						end
+					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			end
@@ -748,14 +642,13 @@ function getbonds(struc::BioStructures.MolecularStructure, selectors...;
 				for k in 1:numatoms
 					if i != k && strip(atms[i].element) == "S" && strip(atms[k].element) == "S"
 						if euclidean(coords(atms[i]), coords(atms[k])) < 2.1
-							bondmatrix[i,k] = 1
-							bondmatrix[k,i] = 1
+							push!(bonds, (min(i,k),max(i,k)))
 						end
 					end
 				end
 			end
 		end
-		return bondmatrix
+		return unique!(bonds)
 	elseif algo == :distance
 		return distancebonds(atms; cutoff = cutoff, H = H, disulfides = disulfides)
 	elseif algo == :covalent
@@ -768,7 +661,7 @@ function getbonds(struc::BioStructures.MolecularStructure, selectors...;
 end
 
 """
-	getbonds( residues ) -> BitMatrix
+	getbonds( residues ) -> Vector{Tuple{Int,Int}}
 
 Returns a matrix of all bonds in `residues::Vector{MIToS.PDB.PDBResidue}`,
 where Mat[i,j] = 1 if atoms i and j are bonded.
@@ -791,7 +684,7 @@ function getbonds(resz::Vector{MIToS.PDB.PDBResidue};
 	resindices = [[i for j in 1:size(bestoccupancy(resz[i].atoms),1)] for i in 1:length(resz)] |> flatten
 	resnames = [[resz[i].id.name for j in 1:size(bestoccupancy(resz[i].atoms),1)] for i in 1:length(resz)] |> flatten
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 	if algo == :knowledgebased
 		for i in 1:numatoms
 			resatoms = bestoccupancy(resz[resindices[i]].atoms)
@@ -810,40 +703,16 @@ function getbonds(resz::Vector{MIToS.PDB.PDBResidue};
 				secondatomname = atms[j].atom
 				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
 					if euclidean(atms[i].coordinates |> collect, atms[j].coordinates |> collect) < cutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 				### residue atoms ###
-				if bondmatrix[i,j] == 1
-					continue
-				end
-				if resindices[i] == resindices[j]
-					heavybondresz = heavyresbonds[resnames[i]] |> combinedims
-					heavylength = size(heavybondresz,2)
-					for k in 1:heavylength
-						if firstatomname == heavybondresz[1,k] && secondatomname == heavybondresz[2,k] ||
-								firstatomname == heavybondresz[2,k] && secondatomname == heavybondresz[1,k]
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
-							break
-						end
-					end
+				if resindices[i] == resindices[j] && hasknowledgebasedbond(heavyresbonds[resnames[i]], firstatomname, secondatomname)
+					push!(bonds, (min(i,j),max(i,j)))
 				end
 				### hydrogen atoms ###
-				if H == true
-					hbondresz = hresbonds[resnames[i]] |> combinedims
-					if size(hbondresz,1) <= 1
-						continue
-					end
-					hlength = size(hbondresz,2)
-					for k in 1:hlength
-						if firstatomname == hbondresz[1,k] && secondatomname == hbondresz[2,k]
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
-							break
-						end
-					end
+				if H == true && hasknowledgebasedbond(hresbonds[resnames[i]], firstatomname, secondatomname)
+					push!(bonds, (min(i,j),max(i,j)))
 				end
 			end
 			### disulfide bonds ###
@@ -851,14 +720,13 @@ function getbonds(resz::Vector{MIToS.PDB.PDBResidue};
 				for k in 1:numatoms
 					if i != k && strip(atms[i].element) == "S" && strip(atms[k].element) == "S"
 						if euclidean(coords(atms[i]), coords(atms[k])) < 2.1
-							bondmatrix[i,k] = 1
-							bondmatrix[k,i] = 1
+							push!(bonds, (min(i,k),max(i,k)))
 						end
 					end
 				end
 			end
 		end
-		return bondmatrix
+		return unique!(bonds)
 	elseif algo == :distance
 		return distancebonds(resz; cutoff = cutoff, H = H, disulfides = disulfides)
 	elseif algo == :covalent
@@ -877,7 +745,7 @@ function getbonds(atms::Vector{MIToS.PDB.PDBAtom};
 				disulfides = false)
 
 	numatoms = size(atms,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 	warn("Using a vector of PDBAtoms is not recommended, use a vector of PDBResidues instead")
 
 	if algo == :knowledgebased
@@ -902,7 +770,7 @@ function getbonds(resz::Vector{T};
 
 	atms = BioStructures.collectatoms(resz) .|> defaultatom
 	numatoms = size(atms, 1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	if algo == :knowledgebased
 		for i in 1:numatoms
@@ -922,40 +790,18 @@ function getbonds(resz::Vector{T};
 				secondatomname = atms[j].name |> strip
 				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
-				end
-				if bondmatrix[i,j] == 1
-					continue
 				end
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					heavybondresz = heavyresbonds[atmres.name] |> combinedims
-					heavylength = size(heavybondresz,2)
-					for k in 1:heavylength
-						if firstatomname == heavybondresz[1,k] && secondatomname == heavybondresz[2,k] ||
-								firstatomname == heavybondresz[2,k] && secondatomname == heavybondresz[1,k]
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
-							break
-						end
+					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true
-						hbondresz = hresbonds[atmres.name] |> combinedims
-						if size(hbondresz,1) <= 1
-							continue
-						end
-						hlength = size(hbondresz,2)
-						for k in 1:hlength
-							if firstatomname == hbondresz[1,k] && secondatomname == hbondresz[2,k]
-								bondmatrix[i,j] = 1
-								bondmatrix[j,i] = 1
-								break
-							end
-						end
+					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			end
@@ -964,14 +810,13 @@ function getbonds(resz::Vector{T};
 				for k in 1:numatoms
 					if i != k && strip(atms[i].element) == "S" && strip(atms[k].element) == "S"
 						if euclidean(coords(atms[i]), coords(atms[k])) < 2.1
-							bondmatrix[i,k] = 1
-							bondmatrix[k,i] = 1
+							push!(bonds, (min(i,k),max(i,k)))
 						end
 					end
 				end
 			end
 		end
-		return bondmatrix
+		return unique!(bonds)
 	elseif algo == :distance
 		return distancebonds(atms; cutoff = cutoff, H = H, disulfides = disulfides)
 	elseif algo == :covalent
@@ -991,7 +836,7 @@ function getbonds(atms::Vector{T};
 
 	atms = atms .|> defaultatom
 	numatoms = size(atms, 1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	if algo == :knowledgebased
 		for i in 1:numatoms
@@ -1011,40 +856,18 @@ function getbonds(atms::Vector{T};
 				secondatomname = atms[j].name |> strip
 				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
-						bondmatrix[i,j] = 1
-						bondmatrix[j,i] = 1
+						push!(bonds, (min(i,j),max(i,j)))
 					end
-				end
-				if bondmatrix[i,j] == 1
-					continue
 				end
 				### residue atoms ###
 				if atms[i].residue == atms[j].residue
 					atmres = atms[i].residue
-					heavybondresz = heavyresbonds[atmres.name] |> combinedims
-					heavylength = size(heavybondresz,2)
-					for k in 1:heavylength
-						if firstatomname == heavybondresz[1,k] && secondatomname == heavybondresz[2,k] ||
-								firstatomname == heavybondresz[2,k] && secondatomname == heavybondresz[1,k]
-							bondmatrix[i,j] = 1
-							bondmatrix[j,i] = 1
-							break
-						end
+					if hasknowledgebasedbond(heavyresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 					### hydrogen atoms ###
-					if H == true
-						hbondresz = hresbonds[atmres.name] |> combinedims
-						if size(hbondresz,1) <= 1
-							continue
-						end
-						hlength = size(hbondresz,2)
-						for k in 1:hlength
-							if firstatomname == hbondresz[1,k] && secondatomname == hbondresz[2,k]
-								bondmatrix[i,j] = 1
-								bondmatrix[j,i] = 1
-								break
-							end
-						end
+					if H == true && hasknowledgebasedbond(hresbonds[atmres.name], firstatomname, secondatomname)
+						push!(bonds, (min(i,j),max(i,j)))
 					end
 				end
 			end
@@ -1053,14 +876,13 @@ function getbonds(atms::Vector{T};
 				for k in 1:numatoms
 					if i != k && strip(atms[i].element) == "S" && strip(atms[k].element) == "S"
 						if euclidean(coords(atms[i]), coords(atms[k])) < 2.1
-							bondmatrix[i,k] = 1
-							bondmatrix[k,i] = 1
+							push!(bonds, (min(i,k),max(i,k)))
 						end
 					end
 				end
 			end
 		end
-		return bondmatrix
+		return unique!(bonds)
 	elseif algo == :distance
 		return distancebonds(atms; cutoff = cutoff, H = H, disulfides = disulfides)
 	elseif algo == :covalent
@@ -1073,7 +895,7 @@ function getbonds(atms::Vector{T};
 end
 
 """
-	getbonds( coords ) -> BitMatrix
+	getbonds( coords ) -> Vector{Tuple{Int,Int}}
 
 Returns a matrix of all bonds using a N x 3 coordinates matrix.
 Uses a plain cutoff distance with algo option :distance. This is
@@ -1096,7 +918,7 @@ function getbonds(cords::AbstractArray{T};
 	#
 	@assert size(cords,2) == 3 "coords must be an N x 3 matrix"
 	numatoms = size(cords,1)
-	bondmatrix = zeros(numatoms, numatoms) |> BitMatrix
+	bonds = Tuple{Int,Int}[]
 
 	return distancebonds(cords; cutoff = cutoff, H = H, disulfides = disulfides)
 end
@@ -1161,256 +983,157 @@ Returns a (mesh) cylinder between two atoms or points.
 - bondwidth ------------- 0.2
 """
 function bondshapes(chn::BioStructures.Chain; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2)
-    bshapes = Cylinder{Float32}[]
-	bnds = getbonds(chn; algo = algo, cutoff = distance)
-	atms = BioStructures.collectatoms(chn)
-
-	for i in 1:size(bnds,1)
-		for j in (i+1):size(bnds,1)
-			if bnds[i,j] == 1 && i != j
-				atm1 = defaultatom(atms[i])
-				atm2 = defaultatom(atms[j])
-				pnt1 = GeometryBasics.Point3f(atm1.coords)
-				pnt2 = GeometryBasics.Point3f(atm2.coords)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
-			end
-		end
-	end
-
-    return bshapes
+	return bondshapes(BioStructures.collectatoms(chn), getbonds(chn; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
 function bondshapes(struc::BioStructures.MolecularStructure; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2)
-	bshapes = Cylinder{Float32}[]
-	bnds = getbonds(struc; algo = algo, cutoff = distance)
-	atms = BioStructures.collectatoms(struc)
-
-	for k in 1:size(bnds,1)
-		for i in 1:size(bnds[k],1)
-			for j in (i+1):size(bnds[k],1)
-				if bnds[k][i,j] == 1 && i != j
-					atm1 = defaultatom(atms[k][i])
-					atm2 = defaultatom(atms[k][j])
-					pnt1 = GeometryBasics.Point3f(atm1.coords)
-					pnt2 = GeometryBasics.Point3f(atm2.coords)
-					push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
-				end
-			end
-		end
-	end
-
-    return bshapes
+	return bondshapes(BioStructures.collectatoms(struc), getbonds(struc; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
 function bondshapes(resz::Vector{T}; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
-	bshapes = Cylinder{Float32}[]
-	bnds = getbonds(resz; algo = algo, cutoff = distance)
-	atms = BioStructures.collectatoms(resz)
-
-	for i in 1:size(bnds,1)
-		for j in (i+1):size(bnds,1)
-			if bnds[i,j] == 1 && i != j
-				atm1 = defaultatom(atms[i])
-				atm2 = defaultatom(atms[j])
-				pnt1 = GeometryBasics.Point3f(atm1.coords)
-				pnt2 = GeometryBasics.Point3f(atm2.coords)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
-			end
-		end
-	end
-
-    return bshapes
+	return bondshapes(BioStructures.collectatoms(resz), getbonds(resz; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
 function bondshapes(atms::Vector{T}; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
-	bshapes = Cylinder{Float32}[]
-	bnds = getbonds(atms; algo = algo, cutoff = distance)
-
-	for i in 1:size(bnds,1)
-		for j in (i+1):size(bnds,1)
-			if bnds[i,j] == 1 && i != j
-				atm1 = defaultatom(atms[i])
-				atm2 = defaultatom(atms[j])
-				pnt1 = GeometryBasics.Point3f(atm1.coords)
-				pnt2 = GeometryBasics.Point3f(atm2.coords)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
-			end
-		end
-	end
-
-    return bshapes
+	return bondshapes(atms, getbonds(atms; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
 function bondshapes(resz::Vector{T}; algo = :covalent, distance = 1.9, bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
-    bshapes = Cylinder{Float32}[]
-	bnds = getbonds(resz; algo = algo, cutoff = distance)
 	atms = [bestoccupancy(resz[i].atoms) for i in 1:length(resz)] |> flatten
-
-	for i in 1:size(bnds,1)
-		for j in (i+1):size(bnds,1)
-			if bnds[i,j] == 1 && i != j
-				atm1 = atms[i]
-				atm2 = atms[j]
-				pnt1 = GeometryBasics.Point3f(atm1.coordinates)
-				pnt2 = GeometryBasics.Point3f(atm2.coordinates)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
-			end
-		end
-	end
-
-    return bshapes
+	return bondshapes(atms, getbonds(resz; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
-function bondshapes(chn::BioStructures.Chain, bnds::AbstractMatrix; algo = nothing, distance = nothing, bondwidth = 0.2)
-    bshapes = Cylinder{Float32}[]
-	atms = BioStructures.collectatoms(chn)
+function bondshapes(cords::AbstractArray{T}; algo = :covalent, distance = 1.9, bondwidth = 0.2) where {T<:AbstractFloat}
+	@assert size(cords,2) == 3 "coords must be an N x 3 matrix"
+	return bondshapes(cords, getbonds(cords; algo = algo, cutoff = distance); bondwidth = bondwidth)
+end
 
+# --- bondshapes from a precomputed sparse bond list (Vector{Tuple{Int,Int}}), O(#bonds) ---
+function bondshapes(atms::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
+	bshapes = Cylinder{Float32}[]
+	for (i,j) in bonds
+		atm1 = defaultatom(atms[i])
+		atm2 = defaultatom(atms[j])
+		push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(atm1.coords), GeometryBasics.Point3f(atm2.coords), Float32(bondwidth)))
+	end
+	return bshapes
+end
+function bondshapes(atms::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:MIToS.PDB.PDBAtom}
+	bshapes = Cylinder{Float32}[]
+	for (i,j) in bonds
+		push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(atms[i].coordinates), GeometryBasics.Point3f(atms[j].coordinates), Float32(bondwidth)))
+	end
+	return bshapes
+end
+function bondshapes(cords::AbstractArray{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:AbstractFloat}
+	bshapes = Cylinder{Float32}[]
+	for (i,j) in bonds
+		push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(cords[i,:]), GeometryBasics.Point3f(cords[j,:]), Float32(bondwidth)))
+	end
+	return bshapes
+end
+function bondshapes(chn::BioStructures.Chain, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2)
+	return bondshapes(BioStructures.collectatoms(chn), bonds; bondwidth = bondwidth)
+end
+function bondshapes(struc::BioStructures.MolecularStructure, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2)
+	return bondshapes(BioStructures.collectatoms(struc), bonds; bondwidth = bondwidth)
+end
+function bondshapes(resz::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
+	return bondshapes(BioStructures.collectatoms(resz), bonds; bondwidth = bondwidth)
+end
+function bondshapes(resz::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
+	atms = [bestoccupancy(resz[i].atoms) for i in 1:length(resz)] |> flatten
+	return bondshapes(atms, bonds; bondwidth = bondwidth)
+end
+function bondshapes(cords::AbstractArray{T}, noth::Nothing; algo = :covalent, distance = 1.9, bondwidth = 0.2) where {T<:AbstractFloat}
+	return bondshapes(cords; algo = algo, distance = distance, bondwidth = bondwidth)
+end
+
+"""
+	bondmatrix( bonds, natoms ) -> BitMatrix
+
+Convert a sparse bond list (`Vector{Tuple{Int,Int}}`, as returned by `getbonds`) into a
+dense symmetric `BitMatrix`, for callers that need random `mat[i,j]` access. Allocates
+O(natoms^2); only use for small atom counts.
+"""
+function bondmatrix(bonds::AbstractVector{<:Tuple{Integer,Integer}}, natoms::Integer)
+	mat = falses(natoms, natoms)
+	for (i,j) in bonds
+		mat[i,j] = true
+		mat[j,i] = true
+	end
+	return mat
+end
+
+# --- backward-compatible methods taking a dense bond matrix (legacy callers) ---
+function bondshapes(chn::BioStructures.Chain, bnds::AbstractMatrix; algo = nothing, distance = nothing, bondwidth = 0.2)
+	bshapes = Cylinder{Float32}[]
+	atms = BioStructures.collectatoms(chn)
 	for i in 1:size(bnds,1)
 		for j in (i+1):size(bnds,1)
 			if bnds[i,j] == 1 && i != j
 				atm1 = defaultatom(atms[i])
 				atm2 = defaultatom(atms[j])
-				pnt1 = GeometryBasics.Point3f(atm1.coords)
-				pnt2 = GeometryBasics.Point3f(atm2.coords)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
+				push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(atm1.coords), GeometryBasics.Point3f(atm2.coords), Float32(bondwidth)))
 			end
 		end
 	end
-
-    return bshapes
-end
-function bondshapes(struc::BioStructures.MolecularStructure, bnds::AbstractMatrix; algo = nothing, cutoff = nothing, bondwidth = 0.2)
-	bshapes = Cylinder{Float32}[]
-	atms = BioStructures.collectatoms(struc)
-
-	for k in 1:size(bnds,1)
-		for i in 1:size(bnds[k],1)
-			for j in (i+1):size(bnds[k],1)
-				if bnds[k][i,j] == 1 && i != j
-					atm1 = defaultatom(atms[k][i])
-					atm2 = defaultatom(atms[k][j])
-					pnt1 = GeometryBasics.Point3f(atm1.coords)
-					pnt2 = GeometryBasics.Point3f(atm2.coords)
-					push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
-				end
-			end
-		end
-	end
-
-    return bshapes
+	return bshapes
 end
 function bondshapes(resz::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
 	bshapes = Cylinder{Float32}[]
 	atms = BioStructures.collectatoms(resz)
-
 	for i in 1:size(bnds,1)
 		for j in (i+1):size(bnds,1)
 			if bnds[i,j] == 1 && i != j
 				atm1 = defaultatom(atms[i])
 				atm2 = defaultatom(atms[j])
-				pnt1 = GeometryBasics.Point3f(atm1.coords)
-				pnt2 = GeometryBasics.Point3f(atm2.coords)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
+				push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(atm1.coords), GeometryBasics.Point3f(atm2.coords), Float32(bondwidth)))
 			end
 		end
 	end
-
-    return bshapes
+	return bshapes
 end
 function bondshapes(resz::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
-    bshapes = Cylinder{Float32}[]
+	bshapes = Cylinder{Float32}[]
 	atms = [bestoccupancy(resz[i].atoms) for i in 1:length(resz)] |> flatten
-
 	for i in 1:size(bnds,1)
 		for j in (i+1):size(bnds,1)
 			if bnds[i,j] == 1 && i != j
-				atm1 = atms[i]
-				atm2 = atms[j]
-				pnt1 = GeometryBasics.Point3f(atm1.coordinates)
-				pnt2 = GeometryBasics.Point3f(atm2.coordinates)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
+				push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(atms[i].coordinates), GeometryBasics.Point3f(atms[j].coordinates), Float32(bondwidth)))
 			end
 		end
 	end
-
-    return bshapes
+	return bshapes
 end
 function bondshapes(atms::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
 	bshapes = Cylinder{Float32}[]
-
 	for i in 1:size(bnds,1)
 		for j in (i+1):size(bnds,1)
 			if bnds[i,j] == 1 && i != j
 				atm1 = defaultatom(atms[i])
 				atm2 = defaultatom(atms[j])
-				pnt1 = GeometryBasics.Point3f(atm1.coords)
-				pnt2 = GeometryBasics.Point3f(atm2.coords)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
+				push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(atm1.coords), GeometryBasics.Point3f(atm2.coords), Float32(bondwidth)))
 			end
 		end
 	end
-
-    return bshapes
+	return bshapes
 end
 function bondshapes(atms::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:MIToS.PDB.PDBAtom}
-    bshapes = Cylinder{Float32}[]
-
+	bshapes = Cylinder{Float32}[]
 	for i in 1:size(bnds,1)
 		for j in (i+1):size(bnds,1)
 			if bnds[i,j] == 1 && i != j
-				atm1 = atms[i]
-				atm2 = atms[j]
-				pnt1 = GeometryBasics.Point3f(atm1.coordinates)
-				pnt2 = GeometryBasics.Point3f(atm2.coordinates)
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
+				push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(atms[i].coordinates), GeometryBasics.Point3f(atms[j].coordinates), Float32(bondwidth)))
 			end
 		end
 	end
-
-    return bshapes
-end
-function bondshapes(cords::AbstractArray{T}; algo = :covalent, distance = 1.9, bondwidth = 0.2) where {T<:AbstractFloat}
-	@assert size(cords,2) == 3 "coords must be an N x 3 matrix"
-    bshapes = Cylinder{Float32}[]
-	bnds = getbonds(cords; algo = algo, cutoff = distance)
-
-	for i in 1:size(bnds,1)
-		for j in (i+1):size(bnds,1)
-			if bnds[i,j] == 1 && i != j
-				pnt1 = GeometryBasics.Point3f(cords[i,:])
-				pnt2 = GeometryBasics.Point3f(cords[j,:])
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
-			end
-		end
-	end
-
-    return bshapes
+	return bshapes
 end
 function bondshapes(cords::AbstractArray{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:AbstractFloat}
 	@assert size(cords,2) == 3 "coords must be an N x 3 matrix"
-    bshapes = Cylinder{Float32}[]
-
+	bshapes = Cylinder{Float32}[]
 	for i in 1:size(bnds,1)
 		for j in (i+1):size(bnds,1)
 			if bnds[i,j] == 1 && i != j
-				pnt1 = GeometryBasics.Point3f(cords[i,:])
-				pnt2 = GeometryBasics.Point3f(cords[j,:])
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
+				push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(cords[i,:]), GeometryBasics.Point3f(cords[j,:]), Float32(bondwidth)))
 			end
 		end
 	end
-
-    return bshapes
-end
-function bondshapes(cords::AbstractArray{T}, noth::Nothing; algo = :covalent, distance = 1.9, bondwidth = 0.2) where {T<:AbstractFloat}
-	@assert size(cords,2) == 3 "coords must be an N x 3 matrix"
-    bshapes = Cylinder{Float32}[]
-	bnds = getbonds(cords; algo = algo, cutoff = distance)
-
-	for i in 1:size(bnds,1)
-		for j in (i+1):size(bnds,1)
-			if bnds[i,j] == 1 && i != j
-				pnt1 = GeometryBasics.Point3f(cords[i,:])
-				pnt2 = GeometryBasics.Point3f(cords[j,:])
-				push!(bshapes, GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth)))
-			end
-		end
-	end
-
-    return bshapes
+	return bshapes
 end

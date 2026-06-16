@@ -4,7 +4,10 @@ import json
 doc = gemmi.cif.read_file("components.cif.gz")
 
 print("# Collection of known heavy bonds, for a PDB structure file. The knowledge-based bonds defined here are retrieved directly from https://www.wwpdb.org/.")
-print("heavyresbonds = Dict(")
+# Build the Dict via one assignment per residue rather than a single huge Dict(...)
+# literal: a literal with tens of thousands of entries overflows Julia's interpreter
+# during precompilation (segfault), whereas successive top-level assignments do not.
+print("heavyresbonds = Dict{String,Vector{Tuple{String,String}}}()")
 for block in doc:
     name = block.name
 
@@ -14,13 +17,13 @@ for block in doc:
         "atom_id_1",
         "atom_id_2"
     ]):
-        a = row[0]
-        b = row[1]
+        # row.str() removes CIF quoting, giving the true atom name (which may
+        # itself contain a `'` prime or `"` double-prime, e.g. O2', C5'').
+        a = row.str(0)
+        b = row.str(1)
 
-        if a[0] != '"': a = f'"{a}"'
-        if b[0] != '"': b = f'"{b}"'
+        # json.dumps emits a properly quoted/escaped Julia string literal.
+        # Each bond is an immutable tuple (no per-bond Vector header) to save memory.
+        bonds.append(f'({json.dumps(a)},{json.dumps(b)})')
 
-        bonds.append(f'[{a},{b}]')
-
-    print(f'"{name}" => [{",".join(bonds)}],')
-print(")")
+    print(f'heavyresbonds[{json.dumps(name)}] = [{",".join(bonds)}]')
