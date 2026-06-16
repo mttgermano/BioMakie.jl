@@ -37,7 +37,7 @@ end
 """
 	distancebonds( atms ) -> Vector{Tuple{Int,Int}}
 
-Returns a matrix of all bonds in `atms`, where Mat[i,j] = 1 if atoms i and j are bonded.
+Returns the bonds in `atms` as a vector of `(i, j)` index pairs, one per bonded atom pair.
 
 This function uses 'bestoccupancy' or 'defaultatom' to ensure only one position per atom.
 
