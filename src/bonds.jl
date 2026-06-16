@@ -47,7 +47,7 @@ This function uses 'bestoccupancy' or 'defaultatom' to ensure only one position 
 - H ---------------- true  # include bonds with hydrogen atoms
 - disulfides ------- false # include disulfide bonds
 """
-function distancebonds(atms::Vector{T};
+function distancebonds(atms::AbstractVector{T};
 						cutoff = 1.9,
 						hydrogencutoff = 1.14,
 						H = true,
@@ -104,7 +104,7 @@ function distancebonds(atms::Vector{T};
 
 	return unique!(bonds)
 end
-function distancebonds(resz::Vector{T};
+function distancebonds(resz::AbstractVector{T};
 						cutoff = 1.9,
 						hydrogencutoff = 1.14,
 						H = true,
@@ -162,7 +162,7 @@ function distancebonds(resz::Vector{T};
 
 	return unique!(bonds)
 end
-function distancebonds(atms::Vector{T};
+function distancebonds(atms::AbstractVector{T};
 						cutoff = 1.9,
 						hydrogencutoff = 1.14,
 						H = true,
@@ -217,7 +217,7 @@ This function uses 'bestoccupancy' or 'defaultatom' to ensure only one position 
 - H ---------------- true  # include bonds with hydrogen atoms
 - disulfides ------- false # include disulfide bonds
 """
-function covalentbonds(atms::Vector{T};
+function covalentbonds(atms::AbstractVector{T};
 						extradistance = 0.14,
 						H = true,
 						disulfides = false) where {T<:BioStructures.AbstractAtom}
@@ -270,7 +270,7 @@ function covalentbonds(atms::Vector{T};
 
 	return unique!(bonds)
 end
-function covalentbonds(resz::Vector{T};
+function covalentbonds(resz::AbstractVector{T};
 						extradistance = 0.14,
 						H = true,
 						disulfides = false) where {T<:MIToS.PDB.PDBResidue}
@@ -326,7 +326,7 @@ function covalentbonds(resz::Vector{T};
 
 	return unique!(bonds)
 end
-function covalentbonds(atms::Vector{T};
+function covalentbonds(atms::AbstractVector{T};
 						extradistance = 0.14,
 						H = true,
 						disulfides = false) where {T<:MIToS.PDB.PDBAtom}
@@ -767,7 +767,7 @@ function getbonds(atms::Vector{MIToS.PDB.PDBAtom};
 
 	return nothing
 end
-function getbonds(resz::Vector{T};
+function getbonds(resz::AbstractVector{T};
 				algo = :knowledgebased,
 				H = true,
 				cutoff = 1.9,
@@ -833,7 +833,7 @@ function getbonds(resz::Vector{T};
 
 	return nothing
 end
-function getbonds(atms::Vector{T};
+function getbonds(atms::AbstractVector{T};
 				algo = :knowledgebased,
 				H = true,
 				cutoff = 1.9,
@@ -954,7 +954,7 @@ function bondshape(twoatoms::AbstractVector{T}; bondwidth = 0.2) where {T<:BioSt
     pnt2 = GeometryBasics.Point3f(atm2.coords)
     return GeometryBasics.Cylinder(pnt1,pnt2,Float32(bondwidth))
 end
-function bondshape(twopnts::Vector{T}; bondwidth = 0.2) where {T<:GeometryBasics.AbstractPoint}
+function bondshape(twopnts::AbstractVector{T}; bondwidth = 0.2) where {T<:GeometryBasics.AbstractPoint}
     @assert length(twopnts) == 2
 	pnt1 = GeometryBasics.Point3f(twopnts[1])
     pnt2 = GeometryBasics.Point3f(twopnts[2])
@@ -994,13 +994,13 @@ end
 function bondshapes(struc::BioStructures.MolecularStructure; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2)
 	return bondshapes(BioStructures.collectatoms(struc), getbonds(struc; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
-function bondshapes(resz::Vector{T}; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
+function bondshapes(resz::AbstractVector{T}; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
 	return bondshapes(BioStructures.collectatoms(resz), getbonds(resz; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
-function bondshapes(atms::Vector{T}; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
+function bondshapes(atms::AbstractVector{T}; algo = :knowledgebased, distance = 1.9, bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
 	return bondshapes(atms, getbonds(atms; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
-function bondshapes(resz::Vector{T}; algo = :covalent, distance = 1.9, bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
+function bondshapes(resz::AbstractVector{T}; algo = :covalent, distance = 1.9, bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
 	atms = [bestoccupancy(resz[i].atoms) for i in 1:length(resz)] |> flatten
 	return bondshapes(atms, getbonds(resz; algo = algo, cutoff = distance); bondwidth = bondwidth)
 end
@@ -1010,7 +1010,7 @@ function bondshapes(cords::AbstractArray{T}; algo = :covalent, distance = 1.9, b
 end
 
 # --- bondshapes from a precomputed sparse bond list (Vector{Tuple{Int,Int}}), O(#bonds) ---
-function bondshapes(atms::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
+function bondshapes(atms::AbstractVector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
 	bshapes = Cylinder{Float32}[]
 	for (i,j) in bonds
 		atm1 = defaultatom(atms[i])
@@ -1019,7 +1019,7 @@ function bondshapes(atms::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integ
 	end
 	return bshapes
 end
-function bondshapes(atms::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:MIToS.PDB.PDBAtom}
+function bondshapes(atms::AbstractVector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:MIToS.PDB.PDBAtom}
 	bshapes = Cylinder{Float32}[]
 	for (i,j) in bonds
 		push!(bshapes, GeometryBasics.Cylinder(GeometryBasics.Point3f(atms[i].coordinates), GeometryBasics.Point3f(atms[j].coordinates), Float32(bondwidth)))
@@ -1039,10 +1039,10 @@ end
 function bondshapes(struc::BioStructures.MolecularStructure, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2)
 	return bondshapes(BioStructures.collectatoms(struc), bonds; bondwidth = bondwidth)
 end
-function bondshapes(resz::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
+function bondshapes(resz::AbstractVector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
 	return bondshapes(BioStructures.collectatoms(resz), bonds; bondwidth = bondwidth)
 end
-function bondshapes(resz::Vector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
+function bondshapes(resz::AbstractVector{T}, bonds::AbstractVector{<:Tuple{Integer,Integer}}; bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
 	atms = [bestoccupancy(resz[i].atoms) for i in 1:length(resz)] |> flatten
 	return bondshapes(atms, bonds; bondwidth = bondwidth)
 end
@@ -1081,7 +1081,7 @@ function bondshapes(chn::BioStructures.Chain, bnds::AbstractMatrix; algo = nothi
 	end
 	return bshapes
 end
-function bondshapes(resz::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
+function bondshapes(resz::AbstractVector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:BioStructures.AbstractResidue}
 	bshapes = Cylinder{Float32}[]
 	atms = BioStructures.collectatoms(resz)
 	for i in 1:size(bnds,1)
@@ -1095,7 +1095,7 @@ function bondshapes(resz::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) wher
 	end
 	return bshapes
 end
-function bondshapes(resz::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
+function bondshapes(resz::AbstractVector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:MIToS.PDB.PDBResidue}
 	bshapes = Cylinder{Float32}[]
 	atms = [bestoccupancy(resz[i].atoms) for i in 1:length(resz)] |> flatten
 	for i in 1:size(bnds,1)
@@ -1107,7 +1107,7 @@ function bondshapes(resz::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) wher
 	end
 	return bshapes
 end
-function bondshapes(atms::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
+function bondshapes(atms::AbstractVector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:BioStructures.AbstractAtom}
 	bshapes = Cylinder{Float32}[]
 	for i in 1:size(bnds,1)
 		for j in (i+1):size(bnds,1)
@@ -1120,7 +1120,7 @@ function bondshapes(atms::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) wher
 	end
 	return bshapes
 end
-function bondshapes(atms::Vector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:MIToS.PDB.PDBAtom}
+function bondshapes(atms::AbstractVector{T}, bnds::AbstractMatrix; bondwidth = 0.2) where {T<:MIToS.PDB.PDBAtom}
 	bshapes = Cylinder{Float32}[]
 	for i in 1:size(bnds,1)
 		for j in (i+1):size(bnds,1)
