@@ -7,7 +7,12 @@ export distancebonds,
 	   bondshape,
 	   bondshapes
 
-# Atom names (CA, C, N, O, ...) repeat across nearly all ~50k residue types in
+# Atom names used to detect inter-residue backbone connections via distance, since
+# heavyresbonds/hresbonds only encode intra-residue bonds. Covers the protein peptide
+# bond (C-N) and the DNA/RNA phosphodiester bond (O3'-P).
+const backboneconnectoratoms = ["N","CA","C","O","P","O3'"]
+
+# Atom names (CA, C, N, O, O3', ...) repeat across nearly all ~50k residue types in
 # heavyresbonds/hresbonds, so the parsed string literals would otherwise be millions of
 # duplicate String objects. Intern them once at load so identical names share one object,
 # cutting the resident footprint of both dictionaries substantially.
@@ -58,7 +63,7 @@ function distancebonds(atms::Vector{T};
 		end
 		for j in (i+1):nextresatms
 			### backbone bonds ###
-			if strip(atms[i].name) in ["N","CA","C","O"] && strip(atms[j].name) in ["N","CA","C","O"]
+			if strip(atms[i].name) in backboneconnectoratoms && strip(atms[j].name) in backboneconnectoratoms
 				if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
 					push!(bonds, (min(i,j),max(i,j)))
 				end
@@ -117,7 +122,7 @@ function distancebonds(resz::Vector{T};
 			nextresatms = numatoms
 		end
 		for j in (i+1):nextresatms
-			if atms[i].atom in ["N","CA","C","O"] && atms[j].atom in ["N","CA","C","O"]
+			if atms[i].atom in backboneconnectoratoms && atms[j].atom in backboneconnectoratoms
 				if euclidean(atms[i].coordinates, atms[j].coordinates) < cutoff
 					push!(bonds, (min(i,j),max(i,j)))
 				end
@@ -227,7 +232,7 @@ function covalentbonds(atms::Vector{T};
 		end
 		for j in (i+1):nextresatms
 			### backbone bonds ###
-			if strip(atms[i].name) in ["N","CA","C","O"] && strip(atms[j].name) in ["N","CA","C","O"]
+			if strip(atms[i].name) in backboneconnectoratoms && strip(atms[j].name) in backboneconnectoratoms
 				if euclidean(coords(atms[i]), coords(atms[j])) < (covalentradii[BioStructures.element(atms[i])] +
 						covalentradii[BioStructures.element(atms[j])] + extradistance)
 					push!(bonds, (min(i,j),max(i,j)))
@@ -283,7 +288,7 @@ function covalentbonds(resz::Vector{T};
 		end
 		for j in (i+1):nextresatms
 			### backbone bonds ###
-			if atms[i].atom in ["N","CA","C","O"] && atms[j].atom in ["N","CA","C","O"]
+			if atms[i].atom in backboneconnectoratoms && atms[j].atom in backboneconnectoratoms
 				if euclidean(atms[i].coordinates, atms[j].coordinates) < (covalentradii[atms[i].element] +
 						covalentradii[atms[j].element] + extradistance)
 					push!(bonds, (min(i,j),max(i,j)))
@@ -393,7 +398,7 @@ function sidechainbonds(res::BioStructures.AbstractResidue, selectors...;
 				### backbone atoms ###
 				firstatomname = atms[i].name |> strip
 				secondatomname = atms[j].name |> strip
-				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
+				if firstatomname in backboneconnectoratoms && secondatomname in backboneconnectoratoms
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
 						continue
 					end
@@ -437,7 +442,7 @@ function backbonebonds(chn::BioStructures.Chain; cutoff = 1.6)
 		for j in (i+1):size(bbatoms,1)
 			firstatomname = strip(bbatoms[i].name)
 			secondatomname = strip(bbatoms[j].name)
-			if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
+			if firstatomname in backboneconnectoratoms && secondatomname in backboneconnectoratoms
 				if euclidean(coordarray(bbatoms[i]) |> transpose |> collect, coordarray(bbatoms[j]) |> transpose |> collect) < cutoff
 					push!(bonds, (min(i,j),max(i,j)))
 				end
@@ -490,7 +495,7 @@ function getbonds(chn::BioStructures.Chain, selectors...;
 				### backbone atoms ###
 				firstatomname = atms[i].name |> strip
 				secondatomname = atms[j].name |> strip
-				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
+				if firstatomname in backboneconnectoratoms && secondatomname in backboneconnectoratoms
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
 						push!(bonds, (min(i,j),max(i,j)))
 					end
@@ -555,7 +560,7 @@ function getbonds(modl::BioStructures.Model, selectors...;
 				### backbone atoms ###
 				firstatomname = atms[i].name |> strip
 				secondatomname = atms[j].name |> strip
-				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
+				if firstatomname in backboneconnectoratoms && secondatomname in backboneconnectoratoms
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
 						push!(bonds, (min(i,j),max(i,j)))
 					end
@@ -620,7 +625,7 @@ function getbonds(struc::BioStructures.MolecularStructure, selectors...;
 				### backbone atoms ###
 				firstatomname = atms[i].name |> strip
 				secondatomname = atms[j].name |> strip
-				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
+				if firstatomname in backboneconnectoratoms && secondatomname in backboneconnectoratoms
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
 						push!(bonds, (min(i,j),max(i,j)))
 					end
@@ -701,7 +706,7 @@ function getbonds(resz::Vector{MIToS.PDB.PDBResidue};
 				### backbone atoms ###
 				firstatomname = atms[i].atom
 				secondatomname = atms[j].atom
-				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
+				if firstatomname in backboneconnectoratoms && secondatomname in backboneconnectoratoms
 					if euclidean(atms[i].coordinates |> collect, atms[j].coordinates |> collect) < cutoff
 						push!(bonds, (min(i,j),max(i,j)))
 					end
@@ -788,7 +793,7 @@ function getbonds(resz::Vector{T};
 				### backbone atoms ###
 				firstatomname = atms[i].name |> strip
 				secondatomname = atms[j].name |> strip
-				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
+				if firstatomname in backboneconnectoratoms && secondatomname in backboneconnectoratoms
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
 						push!(bonds, (min(i,j),max(i,j)))
 					end
@@ -854,7 +859,7 @@ function getbonds(atms::Vector{T};
 				### backbone atoms ###
 				firstatomname = atms[i].name |> strip
 				secondatomname = atms[j].name |> strip
-				if firstatomname in ["N","CA","C","O"] && secondatomname in ["N","CA","C","O"]
+				if firstatomname in backboneconnectoratoms && secondatomname in backboneconnectoratoms
 					if euclidean(coords(atms[i]), coords(atms[j])) < cutoff
 						push!(bonds, (min(i,j),max(i,j)))
 					end
